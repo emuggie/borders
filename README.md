@@ -1,2 +1,4 @@
-# serverlease-python
-Experimental web framework for Serverlease implemented in python
+# Serverlease-Python
+Experimental web framework for Serverlease based on python
+
+##
