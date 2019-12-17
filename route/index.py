@@ -1,14 +1,16 @@
 from flask import request
 import threading
+import json
 
-def before(response = None) :
-    print('before root', request.method)
+print("module loaded")
+
+def before(*response) :
+    print('before root', request.remote_addr)
     return
 
-def handle(response = None) :
-    print('handle root')
-    return "/"
+def handle(*response) :
+    return json.dumps({"file":"/index.py"})
 
-def after(response = None) :
+def after(*response) :
     print('after root')
     return

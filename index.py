@@ -1,19 +1,19 @@
 import importlib
 import threading
-import app.app as rt
+import serverlease
+import serverlease.loader
 
-from flask import Flask, request
+from flask import Flask, request, Response,abort
 app = Flask(__name__)
 
-rt.setBasePath("./route")
-rt.lookup()
+serverlease.setBasePath("./route")
+serverlease.lookup()
 
 @app.route('/')
 @app.route('/<path:reqPath>')
 def index(reqPath:str="/") :
-    res = rt.route(reqPath)
+    if reqPath == "favicon.ico" :
+        abort(404)
+        return
+    res = serverlease.route(reqPath)
     return res
-
-
-
-
