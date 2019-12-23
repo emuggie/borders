@@ -1,16 +1,19 @@
-from flask import request
 import threading
 import json
+from logging import getLogger
+import borders as app
 
-print("module loaded")
+logger = getLogger(__name__)
 
-def before(*response) :
-    print('before root', request.remote_addr)
-    return
+local = app.getLocal()
 
-def handle(*response) :
-    return json.dumps({"file":"/index.py"})
+@app.handler()
+def get() :
+    print('get1',local.request.method, app.isExactPath(), app.getCurrentPath(), app.getRequestPath())
+    return "index"
 
-def after(*response) :
-    print('after root')
-    return
+@app.handler(on = lambda : app.getRequestPath() == "tested/", block = False)
+def get2() :
+    print ('get2')
+    return "test3"
+

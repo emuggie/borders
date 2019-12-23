@@ -1,14 +1,16 @@
-from flask import request
-import threading
+import borders as app
 
+@app.handler()
 def before(response = None) :
     print('before test')
-    return
+    return app.proceed()
 
+@app.handler()
 def handle(response = None) :
     print('handle test')
-    return "done from index"
+    return app.proceed()
 
+@app.handler()
 def after(response = None) :
     print('after test')
-    return
+    return app.proceed()
