@@ -5,67 +5,85 @@ import asyncio
 
 from .loader import moduleTree, Handler
 from .logging import getLogger
-
+from .data import Stack, Queue
 logger = getLogger(__name__)
 
-MAX_CHAIN = 20
+MAX_CHAIN = 50
 
 eventLoop = asyncio.get_event_loop()
 _contextMap = weakref.WeakKeyDictionary()
 
 class RequestContext :
     def __init__(self):
-        self.pathStack = []
-        self.callStack = [] # type: List[Handler]
-        self.callStackIdx = -1
+        global MAX_CHAIN
+        self._pathStack = []
+        self._waitQueue = Queue(MAX_CHAIN)
+        self._callStack = Stack(MAX_CHAIN) # type: List[Handler]
         self.local = LazySimpleNamespace()
         self._local = SimpleNamespace()
 
-    def append(self, handler:Handler)-> int :
-        # Error if chain exceeds max chain
-        self.callStack.append(handler)
-        global MAX_CHAIN
-        if len(self.callStack) > MAX_CHAIN :
-            raise(MaxDepthExceedError("Over 20"))
-        return len(self.callStack)
+    def addQueue(self, *handlers:Handler)-> bool :
+        """
+        Add handler to waitQueue.
+        Retrun True if blocks after
+        """
+        for handler in handlers :
+            if handler == None :
+                continue
+            # to offer handler scoped values
+            self._callStack.put(handler)
+            if handler.on() :
+                self._waitQueue.put(handler)
+            block = handler.block() 
+            # remove after invocation overs
+            self._callStack.get()
+            if block :
+                break
+        return block
+    
+    def proceed(self, *args, **kwargs) -> Any :
+        if not self.hasNext() :
+            logger.debug('Next chain not found, arguments:', *args, **kwargs)
+            return None
+        
+        handler = self._waitQueue.get()
+        currentWaits = self._waitQueue.size()
+        # handler scoped : callstack will always increase.
+        self._callStack.put(handler)
+        logger.debug('Proceed call chain:', handler)
+        returned = handler(*args, **kwargs)
+        logger.debug('Returned : ', returned)
+        # Force proceed if user hasn't wrapped proceed.
+        if self._waitQueue.size() > 0 and currentWaits == self._waitQueue.size() :
+            logger.debug('Proceed not invoked. force proceeding')
+            returned = self.proceed(returned) or returned
+        return returned
 
-    def validate(self) :
+    def hasNext(self) :
+        return self._waitQueue.size() > 0
+
+    def isValid(self) :
         # TODO : Should add case for passing only cases : Exact Match but don't serve?
-        if(len(self.callStack) == 0) :
+        print("111111",self._waitQueue._list,self.getRequestPath(),self._waitQueue.last().relPath)
+        if self._waitQueue.size() == 0  :
             return False
-        if self.isExactPath() :
+        if self.getRequestPath().rstrip("/index").strip("/") == self._waitQueue.last().relPath :
             return True
-        if not self.callStack[-1].block() :
+        if not self._waitQueue.last().block() :
             return False
         return True
 
-    def getRequestPath(self) -> str :
-        return self.pathStack[-1]
-    
+    def getCurrentHandler(self) :
+        return self._callStack.peek()
+
     def getCurrentPath(self) -> str :
-        return self.callStack[self.callStackIdx].relPath
+        return self.getCurrentHandler().relPath
 
+    def getRequestPath(self) -> str :
+        return self._pathStack[-1]
+    
     def isExactPath(self) -> bool :
-        return self.getRequestPath().strip("/") == self.getCurrentPath()
-
-    def hasNext(self) -> bool:
-        return len(self.callStack) > self.callStackIdx
-            
-    def proceed(self, *args, **kwargs) -> Any :
-        curStackIdx = self.callStackIdx = self.callStackIdx +1
-        if not self.hasNext() :
-            logger.debug('Next chain not found, return arguments:', *args, **kwargs)
-            return tuple(args)
-        handler = self.callStack[self.callStackIdx]
-        logger.debug('Proceed call chain:', self.callStackIdx, handler)
-        returnVal = handler(*args, **kwargs)
-        logger.debug('Returned : ', returnVal)
-        # Force proceed if user hasn't proceeded.
-        if self.callStackIdx == curStackIdx :
-            logger.debug('Proceed not invoked. force proceeding to', self.callStackIdx + 1)
-            returnVal = self.proceed(returnVal) or returnVal
-            logger.debug('Returned : ', returnVal)
-        return returnVal
+        return self.getRequestPath().rstrip("/index").strip("/") == self.getCurrentPath()
 
 class LazySimpleNamespace(SimpleNamespace) :
     def __getattribute__(self, name):
@@ -77,13 +95,10 @@ class LazySimpleNamespace(SimpleNamespace) :
 def getContext() -> RequestContext:
     try :
         logger.debug('getTask :get_running_loop()') 
-        getLoop = getattr(asyncio,'get_running_loop',asyncio.get_event_loop)
         ctx = asyncio.Task.current_task()
-    except Exception as error: 
-        try :
-            logger.debug('getTask : from main Thread') 
-            ctx = asyncio.Task.current_task(eventLoop)
-        except Exception as error : 
+        if ctx == None :
+            raise
+    except : 
             logger.debug('getTask : from Thread') 
             ctx =  threading.current_thread()
     
@@ -93,13 +108,13 @@ def getContext() -> RequestContext:
     return weakref.proxy(_contextMap.get(ctx))
 
 def getRequestPath() -> str :
-    return getContext().pathStack[-1]
+    return getContext()._pathStack[-1]
     
 def getCurrentPath() -> str :
     return getContext().callStack[getContext().callStackIdx].relPath
 
 def isExactPath() -> bool :
-    return getContext().getRequestPath().strip("/") == getContext().getCurrentPath()
+    return getContext().isExactPath()
 
 def getLocal()-> Dict :
     return LazySimpleNamespace()
@@ -120,7 +135,7 @@ def handle(path:str, startFrom:str = "",*args,**kwargs) -> Any :
         - defined in ancestor path and 'block' is function returns True or value True.\n
     """
     context = getContext()
-    context.pathStack.append(path)
+    context._pathStack.append(path)
     logger.debug("Routing : ", getRequestPath(), context)
     path = path.strip("/")
     startFrom = startFrom.strip("/")
@@ -128,7 +143,7 @@ def handle(path:str, startFrom:str = "",*args,**kwargs) -> Any :
 
     currentNode = moduleTree
     for subPath in startFrom.split("/") :
-        if subPath == "" :
+        if subPath == "" or subPath == None :
             break
         subTree = currentNode.get(subPath)
         if subTree == None :
@@ -140,26 +155,16 @@ def handle(path:str, startFrom:str = "",*args,**kwargs) -> Any :
     subPaths.append(None)
     for subPath in subPaths:
         indexs = currentNode.get("index.py") 
-        if indexs != None :
-            for index in indexs :
-                index.on() and context.append(index)
-                if index.block() :
-                    break
-            if index.block() :
-                break
+        if indexs != None and context.addQueue(*indexs) :
+            break
 
         # End of path
         if subPath == None :
             break
 
         endPoints = currentNode.get(subPath + ".py")
-        if endPoints != None :
-            for endPoint in endPoints : 
-                endPoint.on() and context.append(endPoint)
-                if endPoint.block() :
-                    break
-            if endPoint.block() :
-                break
+        if endPoints != None and context.addQueue(*endPoints) :
+            break
 
         subTree = currentNode.get(subPath)
         # Suspended on middle
@@ -167,15 +172,16 @@ def handle(path:str, startFrom:str = "",*args,**kwargs) -> Any :
             break
 
         currentNode = subTree
-    logger.debug('callstack', context.callStack)
+
+    logger.debug('callstack', context._callStack)
     # Panic if path doesn't match
-    if not context.validate() :
+    if not context.isValid() :
         raise(PathNotFoundError("Page Not Found"))
 
     result = context.proceed(args, kwargs)
     # Remove path stack
     
-    logger.debug('Result from path:',context.pathStack.pop()," -> ", result)
+    logger.debug('Result from path:',context._pathStack.pop()," -> ", result)
     return result
 
 class PathNotFoundError(Exception) :

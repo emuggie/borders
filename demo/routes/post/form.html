@@ -1,0 +1,25 @@
+<html>
+    <head>
+        <script type="text/javascript">
+            function submitf(){
+                fetch('/post/form',{
+                    method : "POST",
+                    body : new FormData(document.querySelector("#form"))
+                }).then(response=>{
+                    return response.text()
+                }).then(txt=>{
+                    alert(txt)
+                })
+            }
+        </script>
+
+    </head>
+    <body>
+        <form id="form" method="POST" action="/post/form">
+            <input type="text" name="value1">
+            <input type="text" name="value2">
+            <input type="text" name="value3">
+            <input type="button" onclick="submitf()">submit</input>
+        </form>
+    </body>
+</html>

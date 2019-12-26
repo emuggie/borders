@@ -1,0 +1,50 @@
+<html>
+    <head>
+        <title>pworm demo page</title>
+        <!-- <script src="https://cdn.jsdelivr.net/npm/vue/dist/vue.js"></script> -->
+        <script type="text/javascript">
+            window.onload = () => {
+                fetch("/index", {
+                    headers: {
+                        "Content-Type": "application/json"
+                    }
+                }).then(response => {
+                    response.json().then(console.log)
+                });
+            };
+        </script>
+    </head>
+    <body>
+        <h3>Hello pworm</h3>
+
+        <table id="modules">
+            <thead>
+                <tr>
+                    <th>Loaded Modules</th>
+                    <th>Path</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td></td>
+                    <td></td>
+                </tr>
+            </tbody>
+        </table>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>Loaded Handlers</th>
+                    <th>Path</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td></td>
+                    <td></td>
+                </tr>
+            </tbody>
+        </table>
+    </body>
+</html>

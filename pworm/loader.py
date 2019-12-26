@@ -1,37 +1,39 @@
 import os, inspect
 from importlib.util import spec_from_file_location, module_from_spec
 from typing import Any, Callable, Union
-
 from .logging import getLogger
+
 # Base import path of modules
-basePath = None
+
 modules = {}
 moduleTree = {}
 
+currentPath = None
+
 logger = getLogger(__name__)
 
-def setBasePath(path:str) -> None : 
+def defaultFilter(filePath:str) -> bool:
     """
-    Set base directory for module location to lookup
+    Default filter function to determine.
     """
-    global basePath
-    # Error when tries to set base base multiple time
-    if basePath != None :
-        raise Exception('basePath already Initialized', basePath)
-    # Raise error if basePath is invalid
+    if filePath.find("/__") > -1 :
+        return False
+    if not filePath.endswith('.py') :
+        return False
+    return True
 
-    basePath = path if path.endswith("/") else path + "/"
-    logger.debug("BasePath for Modules :", basePath)
-    return
-
-def lookup() -> None :
+def lookup(basePath:str, filter = defaultFilter) -> None :
     """
     look for python files. 
     """
-    global basePath, modules
-    if basePath == None : 
-        logger.debug("BasePath reconfigured to current path : ./")
-    basePath = "./" if basePath == None else basePath
+    global modules, currentPath
+
+    if basePath == None :
+        logger.debug("path reconfigured to current path : ./")
+        basePath = "./" if basePath == None else basePath
+    # Set currrent basePath to notify handlers
+    currentPath = basePath
+
     for root, dirs, files in os.walk(basePath) :
         # Ignore hidden directories which starts with '__'
         if root.find("/__") > -1 :
@@ -39,21 +41,22 @@ def lookup() -> None :
             continue
 
         # Directory with empty handler
-        modules.update({root.replace(basePath,""): None})
+        # modules.update({root.replace(basePath,""): None})
 
         for file in files :
-            if not file.endswith(".py") :
-                continue
+            # if not file.endswith(".py") :
             filePath = os.path.join(root, file)
+            if not filter(filePath) :
+                continue
             logger.debug("Module found : ", filePath)
-            loadModule(filePath)
+            loadModule(filePath, basePath)
     # Print total routes
     logger.debug("Module loaded : ", modules)
-    logger.debug("Module tree built : ", moduleTree)
+    logger.debug("Handler tree built : ", moduleTree)
 
 # Load py file in filePath.
-def loadModule(filePath:str, reload:bool = False) -> None : 
-    global basePath, modules, moduleTree
+def loadModule(filePath:str, basePath:str, reload:bool = False) -> None : 
+    global modules, moduleTree
     # Return if module already loaded by import
     if filePath in modules :
         return
@@ -72,6 +75,7 @@ def loadModule(filePath:str, reload:bool = False) -> None :
 
 # Add loaded Module to dict tree for route lookup
 def addToTree(path:str, handler, treeNode:dict) -> None :
+    path = path.strip("/")
     childPath = path[:path.find("/")] if path.find("/")> -1 else path
     remainPath = path[path.find("/")+1:] if path.find("/")> -1 else None
     if remainPath == None or remainPath == "" :
@@ -91,7 +95,7 @@ class Handler :
         Decorator class for handler function and  module.
     """
     def __init__(self, handlerFunc:Callable) :
-        global modules,basePath
+        global modules,currentPath
         self.handlerFunc = handlerFunc
         # FullArgSpec(args=[], varargs=None, varkw=None, defaults=None, kwonlyargs=[], kwonlydefaults={}, annotations={'name': <class 'str'>})
         argsSpec = inspect.getfullargspec(self.handlerFunc)
@@ -99,7 +103,7 @@ class Handler :
         self.args = argsSpec[0]
         self.kwargs = argsSpec[4]
         self.path = inspect.getsourcefile(self.handlerFunc)
-        self.relPath = self.path.replace(basePath,"").rstrip(".py").rstrip("index").strip("/")
+        self.relPath = self.path.replace(currentPath,"").rstrip(".py").rstrip("index").strip("/")
         # Register module for later use
         self.module = inspect.getmodule(self.handlerFunc)
         
@@ -108,7 +112,7 @@ class Handler :
         elif self.module == None :
             self.module = modules.get(self.path)     
 
-        addToTree(self.path.replace(basePath, ""), self, moduleTree)
+        addToTree(self.path.replace(currentPath, ""), self, moduleTree)
     
     def __call__(self, *args,**kwargs) :
         logger.debug('call', *args,**kwargs)
@@ -141,14 +145,14 @@ def handler(on = None, block = None):
         def __init__(self, handlerFunc):
             super().__init__(handlerFunc)
             nonlocal on
-            self.on = on or True
+            self._on = on or True
             nonlocal block
-            self.block = block or False
+            self._block = block or False
 
         def on(self) -> bool :
-            return self.on() if callable(self.on) else self.on
+            return self._on() if callable(self._on) else self._on
 
         def block(self) -> bool :
-            return self.block() if callable(self.block) else self.block
+            return self._block() if callable(self._block) else self._block
 
     return ExtendedHandler
